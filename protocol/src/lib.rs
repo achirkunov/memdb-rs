@@ -1,4 +1,5 @@
 // TODO: Handle null arrays (*-1\r\n) — change Arrays(Vec<RespFrame>) to Arrays(Option<Vec<RespFrame>>)
+// OR add RespFrame::Null
 
 #[derive(Debug)]
 enum ParseError {
@@ -93,6 +94,21 @@ impl RespFrame {
     fn parse(s: &str) -> Result<Self, ParseError> {
         let (frame, rest) = Self::parse_bytes(s.as_bytes())?;
         Ok(frame)
+    }
+
+    fn marshal(&self) -> Vec<u8> {
+        match self {
+            RespFrame::SimpleString(s) => format!("+{}\r\n", s).into_bytes(),
+            RespFrame::SimpleError(s) => format!("-{}\r\n", s).into_bytes(),
+            RespFrame::Integer(i) => format!(":{}\r\n", i).into_bytes(),
+            RespFrame::BulkStrings(s) => {
+                match s {
+                    Some(s) => format!("${}\r\n{}\r\n", s.len(), s).into_bytes(),
+                    None => b"$-1\r\n".to_vec()
+                }
+            },
+            _ => todo!()
+        }
     }
 
 }
@@ -285,5 +301,89 @@ mod tests {
     fn parse_line_missing_crlf() {
         let result = RespFrame::parse_line(b"OK");
         assert!(matches!(result, Err(ParseError::MissingCLRF)));
+    }
+
+    #[test]
+    fn marshal_simple_string() {
+        let frame = RespFrame::SimpleString("OK".to_string());
+        assert_eq!(frame.marshal(), b"+OK\r\n");
+    }
+
+    #[test]
+    fn marshal_simple_error() {
+        let frame = RespFrame::SimpleError("ERR unknown command".to_string());
+        assert_eq!(frame.marshal(), b"-ERR unknown command\r\n");
+    }
+
+    #[test]
+    fn marshal_integer() {
+        let frame = RespFrame::Integer(42);
+        assert_eq!(frame.marshal(), b":42\r\n");
+    }
+
+    #[test]
+    fn marshal_negative_integer() {
+        let frame = RespFrame::Integer(-1);
+        assert_eq!(frame.marshal(), b":-1\r\n");
+    }
+
+    #[test]
+    fn marshal_bulk_string() {
+        let frame = RespFrame::BulkStrings(Some("hello".to_string()));
+        assert_eq!(frame.marshal(), b"$5\r\nhello\r\n");
+    }
+
+    #[test]
+    fn marshal_bulk_string_empty() {
+        let frame = RespFrame::BulkStrings(Some("".to_string()));
+        assert_eq!(frame.marshal(), b"$0\r\n\r\n");
+    }
+
+    #[test]
+    fn marshal_bulk_string_null() {
+        let frame = RespFrame::BulkStrings(None);
+        assert_eq!(frame.marshal(), b"$-1\r\n");
+    }
+
+    #[test]
+    fn marshal_bulk_string_with_embedded_crlf() {
+        let frame = RespFrame::BulkStrings(Some("hel\r\nlo".to_string()));
+        assert_eq!(frame.marshal(), b"$7\r\nhel\r\nlo\r\n");
+    }
+
+    #[test]
+    fn marshal_integer_zero() {
+        let frame = RespFrame::Integer(0);
+        assert_eq!(frame.marshal(), b":0\r\n");
+    }
+
+    #[test]
+    fn marshal_simple_string_empty() {
+        let frame = RespFrame::SimpleString("".to_string());
+        assert_eq!(frame.marshal(), b"+\r\n");
+    }
+
+    #[test]
+    fn roundtrip_simple_string() {
+        let frame = RespFrame::SimpleString("OK".to_string());
+        let bytes = frame.marshal();
+        let parsed = RespFrame::parse(std::str::from_utf8(&bytes).unwrap()).unwrap();
+        assert_eq!(frame, parsed);
+    }
+
+    #[test]
+    fn roundtrip_bulk_string() {
+        let frame = RespFrame::BulkStrings(Some("hel\r\nlo".to_string()));
+        let bytes = frame.marshal();
+        let parsed = RespFrame::parse(std::str::from_utf8(&bytes).unwrap()).unwrap();
+        assert_eq!(frame, parsed);
+    }
+
+    #[test]
+    fn roundtrip_integer() {
+        let frame = RespFrame::Integer(-42);
+        let bytes = frame.marshal();
+        let parsed = RespFrame::parse(std::str::from_utf8(&bytes).unwrap()).unwrap();
+        assert_eq!(frame, parsed);
     }
 }

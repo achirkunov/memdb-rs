@@ -107,6 +107,14 @@ impl RespFrame {
                     None => b"$-1\r\n".to_vec()
                 }
             },
+            RespFrame::Arrays(vec) => {
+                // it should be *{}\r\n and for {} we will iterates
+                let mut s = format!("*{}\r\n", vec.len()).into_bytes();
+                for i in vec {
+                    s.extend(i.marshal());
+                }
+                s
+            }
             _ => todo!()
         }
     }
@@ -382,6 +390,89 @@ mod tests {
     #[test]
     fn roundtrip_integer() {
         let frame = RespFrame::Integer(-42);
+        let bytes = frame.marshal();
+        let parsed = RespFrame::parse(std::str::from_utf8(&bytes).unwrap()).unwrap();
+        assert_eq!(frame, parsed);
+    }
+
+    #[test]
+    fn marshal_array_empty() {
+        let frame = RespFrame::Arrays(vec![]);
+        assert_eq!(frame.marshal(), b"*0\r\n");
+    }
+
+    #[test]
+    fn marshal_array_of_integers() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::Integer(1),
+            RespFrame::Integer(2),
+            RespFrame::Integer(3),
+        ]);
+        assert_eq!(frame.marshal(), b"*3\r\n:1\r\n:2\r\n:3\r\n");
+    }
+
+    #[test]
+    fn marshal_array_of_bulk_strings() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("hello".to_string())),
+            RespFrame::BulkStrings(Some("world".to_string())),
+        ]);
+        assert_eq!(frame.marshal(), b"*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n");
+    }
+
+    #[test]
+    fn marshal_array_mixed_types() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::SimpleString("OK".to_string()),
+            RespFrame::Integer(42),
+        ]);
+        assert_eq!(frame.marshal(), b"*2\r\n+OK\r\n:42\r\n");
+    }
+
+    #[test]
+    fn marshal_array_nested() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::Arrays(vec![
+                RespFrame::Integer(1),
+                RespFrame::Integer(2),
+            ]),
+            RespFrame::Arrays(vec![
+                RespFrame::Integer(3),
+                RespFrame::Integer(4),
+            ]),
+        ]);
+        assert_eq!(frame.marshal(), b"*2\r\n*2\r\n:1\r\n:2\r\n*2\r\n:3\r\n:4\r\n");
+    }
+
+    #[test]
+    fn marshal_array_with_null_element() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("hello".to_string())),
+            RespFrame::BulkStrings(None),
+            RespFrame::BulkStrings(Some("world".to_string())),
+        ]);
+        assert_eq!(frame.marshal(), b"*3\r\n$5\r\nhello\r\n$-1\r\n$5\r\nworld\r\n");
+    }
+
+    #[test]
+    fn marshal_array_single_element() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::Integer(42),
+        ]);
+        assert_eq!(frame.marshal(), b"*1\r\n:42\r\n");
+    }
+
+    #[test]
+    fn roundtrip_array() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::SimpleString("OK".to_string()),
+            RespFrame::Integer(42),
+            RespFrame::BulkStrings(Some("hello".to_string())),
+            RespFrame::Arrays(vec![
+                RespFrame::Integer(1),
+                RespFrame::Integer(2),
+            ]),
+        ]);
         let bytes = frame.marshal();
         let parsed = RespFrame::parse(std::str::from_utf8(&bytes).unwrap()).unwrap();
         assert_eq!(frame, parsed);

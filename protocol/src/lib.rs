@@ -5,7 +5,7 @@
 enum ParseError {
     MissingCLRF,
     InvalidUTF8,
-    InvalidPrefix,
+    InvalidCommand,
     InvalidInteger,
     Incomplete,
     LengthMismatch,
@@ -87,12 +87,15 @@ impl RespFrame {
                 }
                 Ok((RespFrame::Arrays(items), rest))
             }
-            _ => todo!()
+            _ => Err(ParseError::InvalidCommand)
         }
     }
 
     fn parse(s: &str) -> Result<Self, ParseError> {
         let (frame, rest) = Self::parse_bytes(s.as_bytes())?;
+        if !rest.is_empty() {
+            return Err(ParseError::Incomplete);
+        }
         Ok(frame)
     }
 
@@ -115,7 +118,6 @@ impl RespFrame {
                 }
                 s
             }
-            _ => todo!()
         }
     }
 

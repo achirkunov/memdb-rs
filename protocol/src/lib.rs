@@ -1,18 +1,9 @@
-//   Simple string — prefixed with +, single line, no newlines allowed:                                                               
-//   +OK\r\n         
-                                                                                                                                   
-//   Bulk string — prefixed with $, includes a length, can contain anything (binary safe):                                            
-//   $5\r\n
-//   hello\r\n
-//   Key differences:
-//   - Simple strings can't contain \r\n — bulk strings can (length-delimited, not delimiter-delimited)
-//   - Simple strings are for short status replies (+OK, +PONG)
-//   - Bulk strings are for arbitrary data (user values, keys, command args)
-//   - Bulk strings can represent null: $-1\r\n
-
+// TODO: Handle null arrays (*-1\r\n) — change Arrays(Vec<RespFrame>) to Arrays(Option<Vec<RespFrame>>)
 
 #[derive(Debug)]
 enum ParseError {
+    MissingCLRF,
+    InvalidUTF8,
     InvalidPrefix,
     InvalidInteger,
     Incomplete,
@@ -29,45 +20,81 @@ enum RespFrame {
 }
 
 impl RespFrame {
-    // TODO: Data coming off a TCP socket is raw bytes. It might not be valid UTF-8. Change &str to &[u8]
-    fn parse(s: &str) -> Result<Self, ParseError> {
-        // Every RESP frame ends with \r\n. By stripping it first, the rest of the parsing doesn't have to worry about it
-        //let s = s.strip_suffix("\r\n").ok_or(ParseError::Incomplete)?;
-        let s = match s.strip_suffix("\r\n") {
-            Some(s) => s,
-            None => return Err(ParseError::Incomplete),
-        };
 
-        let prefix = s.as_bytes()[0];
-        let value = &s[1..];
 
-        match prefix {
-            b'+' => Ok(RespFrame::SimpleString(value.to_string())),
-            b'-' => Ok(RespFrame::SimpleError(value.to_string())),
-            b':' => Ok(RespFrame::Integer(value.parse().map_err(|_| ParseError::InvalidInteger)?)),
+    fn parse_line(input: &[u8]) -> Result<(&[u8],&[u8]), ParseError> {
+        let pos = input.windows(2).position(|w| w == b"\r\n").ok_or(ParseError::MissingCLRF)?;
+        Ok((&input[..pos], &input[pos + 2..] ))
+    }
+
+    fn parse_bytes(input: &[u8]) -> Result<(RespFrame, &[u8]), ParseError> {
+        if input.is_empty() {
+            return Err(ParseError::Incomplete);
+        }
+        let (&first, rest) = input.split_first().unwrap();
+        match first {
+            b'+' => {
+                let (data, rest) = Self::parse_line(rest)?;
+                let data = std::str::from_utf8(data).map_err(|_| ParseError::Incomplete )?;
+                Ok((RespFrame::SimpleString(data.to_string()), rest))
+            },
+            b'-' => {
+                let (data, rest) = Self::parse_line(rest)?;
+                let data = std::str::from_utf8(data).map_err(|_| ParseError::InvalidUTF8 )?;
+                Ok((RespFrame::SimpleError(data.to_string()), rest))
+            },
+            b':' => {
+                let (data, rest) = Self::parse_line(rest)?;
+                let data = std::str::from_utf8(data).map_err(|_| ParseError::InvalidUTF8 )?.parse::<i64>().map_err(|_| ParseError::InvalidInteger)?;
+                Ok((RespFrame::Integer(data), rest))
+            },
             b'$' => {
-                if value == "-1" {
-                    return Ok(RespFrame::BulkStrings(None));
+                let (data, rest) = Self::parse_line(rest)?;
+                let data = std::str::from_utf8(data).map_err(|_| ParseError::InvalidUTF8 )?;
+                // The spec uses a 512 MB defauolt max for bulk strings, so usize is enough
+                let len: i64 = data.parse().map_err(|_| ParseError::InvalidInteger )?;
+                if len == -1 {
+                    return Ok((RespFrame::BulkStrings(None), rest))
                 }
-                let (len, data) = value.split_once("\r\n").ok_or(ParseError::Incomplete)?;
-                let len: usize = len.parse().map_err(|_| ParseError::InvalidInteger)?;
-                if data.len() != len {
+                let len = len as usize;
+                if rest.len() < len + 2 {
                     return Err(ParseError::LengthMismatch);
                 }
-                Ok(RespFrame::BulkStrings(Some(data.to_string())))
+                if &rest[len..len+2] != b"\r\n" {
+                    return Err(ParseError::LengthMismatch);
+                }
+                let data = std::str::from_utf8(&rest[..len]).map_err(|_| ParseError::InvalidUTF8 )?;
+                let rest = &rest[len + 2..];
+                Ok((RespFrame::BulkStrings(Some(data.to_string())), rest))
             },
             b'*' => {
-                if value == "0" {
-                    return Ok(RespFrame::Arrays(vec![]));
+                let (data, mut rest) = Self::parse_line(rest)?;
+                let data = std::str::from_utf8(data).map_err(|_| ParseError::InvalidUTF8 )?;
+                // The spec uses a 512 MB defauolt max for bulk strings, so usize is enough
+                let len: i64 = data.parse().map_err(|_| ParseError::InvalidInteger )?;
+                if len == 0 {
+                    return Ok(
+                        (RespFrame::Arrays(vec![]), rest)
+                    );
                 }
-                let (len, data) = value.split_once("\r\n").ok_or(ParseError::Incomplete)?;
-                let _len: usize = len.parse().map_err(|_| ParseError::InvalidInteger)?;
-
-                todo!("non-empty arrays")
-            },
-            _ => Err(ParseError::InvalidPrefix)
+                let mut items = Vec::with_capacity(len as usize);
+                // TODO what if usize is <0 ?
+                for _ in 0..len as usize {
+                    let (item, new_rest) = Self::parse_bytes(rest)?;
+                    items.push(item);
+                    rest = new_rest;
+                }
+                Ok((RespFrame::Arrays(items), rest))
+            }
+            _ => todo!()
         }
     }
+
+    fn parse(s: &str) -> Result<Self, ParseError> {
+        let (frame, rest) = Self::parse_bytes(s.as_bytes())?;
+        Ok(frame)
+    }
+
 }
 
 #[cfg(test)]
@@ -78,6 +105,24 @@ mod tests {
     fn parse_simple_string() {
         let result = RespFrame::parse("+OK\r\n").unwrap();
         assert!(matches!(result, RespFrame::SimpleString(s) if s == "OK"));
+    }
+
+    #[test]
+    fn parse_simple_string_empty() {
+        let result = RespFrame::parse("+\r\n").unwrap();
+        assert!(matches!(result, RespFrame::SimpleString(s) if s == ""));
+    }
+
+    #[test]
+    fn parse_simple_string_with_spaces() {
+        let result = RespFrame::parse("+hello world\r\n").unwrap();
+        assert!(matches!(result, RespFrame::SimpleString(s) if s == "hello world"));
+    }
+
+    #[test]
+    fn parse_simple_string_missing_crlf() {
+        let result = RespFrame::parse("+OK");
+        assert!(matches!(result, Err(ParseError::MissingCLRF)));
     }
 
     #[test]
@@ -145,5 +190,100 @@ mod tests {
         let result = RespFrame::parse("*0\r\n").unwrap();
         let empty_v = vec![];
         assert_eq!(result, RespFrame::Arrays(empty_v));
+    }
+
+    #[test]
+    fn parse_array_of_integers() {
+        let result = RespFrame::parse("*3\r\n:1\r\n:2\r\n:3\r\n").unwrap();
+        assert_eq!(result, RespFrame::Arrays(vec![
+            RespFrame::Integer(1),
+            RespFrame::Integer(2),
+            RespFrame::Integer(3),
+        ]));
+    }
+
+    #[test]
+    fn parse_array_mixed_types() {
+        let result = RespFrame::parse("*2\r\n+OK\r\n:42\r\n").unwrap();
+        assert_eq!(result, RespFrame::Arrays(vec![
+            RespFrame::SimpleString("OK".to_string()),
+            RespFrame::Integer(42),
+        ]));
+    }
+
+    #[test]
+    fn parse_array_of_bulk_strings() {
+        let result = RespFrame::parse("*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n").unwrap();
+        assert_eq!(result, RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("hello".to_string())),
+            RespFrame::BulkStrings(Some("world".to_string())),
+        ]));
+    }
+
+    #[test]
+    fn parse_array_nested() {
+        let result = RespFrame::parse("*2\r\n*2\r\n:1\r\n:2\r\n*2\r\n:3\r\n:4\r\n").unwrap();
+        assert_eq!(result, RespFrame::Arrays(vec![
+            RespFrame::Arrays(vec![
+                RespFrame::Integer(1),
+                RespFrame::Integer(2),
+            ]),
+            RespFrame::Arrays(vec![
+                RespFrame::Integer(3),
+                RespFrame::Integer(4),
+            ]),
+        ]));
+    }
+
+    #[test]
+    fn parse_array_with_null_element() {
+        let result = RespFrame::parse("*3\r\n$5\r\nhello\r\n$-1\r\n$5\r\nworld\r\n").unwrap();
+        assert_eq!(result, RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("hello".to_string())),
+            RespFrame::BulkStrings(None),
+            RespFrame::BulkStrings(Some("world".to_string())),
+        ]));
+    }
+
+    #[test]
+    fn parse_array_with_embedded_crlf_bulk_string() {
+        let result = RespFrame::parse("*1\r\n$7\r\nhel\r\nlo\r\n").unwrap();
+        assert_eq!(result, RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("hel\r\nlo".to_string())),
+        ]));
+    }
+
+    #[test]
+    fn parse_array_single_element() {
+        let result = RespFrame::parse("*1\r\n:42\r\n").unwrap();
+        assert_eq!(result, RespFrame::Arrays(vec![
+            RespFrame::Integer(42),
+        ]));
+    }
+
+    #[test]
+    fn parse_array_incomplete() {
+        let result = RespFrame::parse("*2\r\n:1\r\n");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_line_splits_on_crlf() {
+        let (line, rest) = RespFrame::parse_line(b"OK\r\n").unwrap();
+        assert_eq!(line, b"OK");
+        assert_eq!(rest, b"");
+    }
+
+    #[test]
+    fn parse_line_with_remainder() {
+        let (line, rest) = RespFrame::parse_line(b"5\r\nhello\r\n").unwrap();
+        assert_eq!(line, b"5");
+        assert_eq!(rest, b"hello\r\n");
+    }
+
+    #[test]
+    fn parse_line_missing_crlf() {
+        let result = RespFrame::parse_line(b"OK");
+        assert!(matches!(result, Err(ParseError::MissingCLRF)));
     }
 }

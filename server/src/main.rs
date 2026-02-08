@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::net::{TcpListener, TcpStream};
+use std::thread;
 
 #[derive(Clone)] // TODO: to remove
 enum Value {
@@ -68,20 +70,55 @@ enum Response {
     Error(String),
 }
 
-fn main() {
+fn handle_client(stream: TcpStream) {
+    // ...
+}
+
+// TODO: Replace with Box<dyn>
+fn main() -> std::io::Result<()> {
+
+    let mut port = "6379".to_string();
+    let mut bind = "127.0.0.1".to_string();
+
+    let args: Vec<String> = std::env::args().collect();
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--port" | "-p" => {
+                i += 1;
+                port = args[i].clone();
+            }
+            "--bind" | "-b" => {
+                i += 1;
+                bind = args[i].clone();
+            }
+            _ => eprintln!("unknown arg: {}", args[i]),
+        }
+        i += 1;
+    }
 
     let mut store = Store::new();
 
-    let was_new = store.set("user:1:name", Value::String("Alice".to_string()));
-    println!("was new: {}", was_new);
+    let addr = format!("{}:{}", bind, port);
+    println!("listening on {}", addr);
+    let listener = TcpListener::bind(&addr)?;
 
-    let v = store.get("user:1:name").unwrap();
-
-    if let Value::String(s) = v {
-        println!("v: {}", s);
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => {
+                thread::spawn(|| {
+                    handle_client(stream);
+                });
+            },
+            Err(e) => eprintln!("connection failed: {}", e),
+        }
     }
 
-    let deleted = store.del("user:1:name");
-    println!("deleted: {}", deleted);
+    Ok(())
+
 
 }
+
+
+
+

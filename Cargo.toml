@@ -1,4 +1,3 @@
-[package]
-name = "memdb-rs"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+resolver = "3" # already default for 2024 edition
+members = ["protocol","server"]

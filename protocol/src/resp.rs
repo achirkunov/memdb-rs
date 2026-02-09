@@ -11,7 +11,7 @@ pub enum ParseError {
     LengthMismatch,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum RespFrame {
     SimpleString(String), // +
     SimpleError(String), // -

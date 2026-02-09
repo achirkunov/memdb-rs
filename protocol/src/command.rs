@@ -32,6 +32,21 @@ pub enum Response {
     Error(String),
 }
 
+fn frame_to_value(frame: RespFrame) -> Result<Value, CommandError> {
+    match frame {
+        RespFrame::BulkStrings(Some(s)) | RespFrame::SimpleString(s) => Ok(Value::String(s)),
+        RespFrame::Integer(i) => Ok(Value::Integer(i)),
+        _ => Err(CommandError::WrongArity),
+    }
+}
+
+fn expect_bulk_string(frame: &RespFrame) -> Result<String, CommandError> {
+    match frame {
+        RespFrame::BulkStrings(Some(s)) => Ok(s.clone()),
+        _ => Err(CommandError::WrongArity),
+    }
+}
+
 impl Command {
     pub fn from_frame(frame: RespFrame) -> Result<Command, CommandError> {
         let frames = match frame {
@@ -50,6 +65,14 @@ impl Command {
 
         match name.as_str() {
             "PING" => Ok(Command::Ping),
+            "SET" => {
+                if frames.len() != 3 {
+                    return Err(CommandError::WrongArity);
+                }
+                let key = expect_bulk_string(&frames[1])?;
+                let value = frame_to_value(frames[2].clone())?;
+                Ok(Command::Set(key, value))
+            }
             _ => Err(CommandError::UnknownCommand(name)),
         }
     }
@@ -107,5 +130,64 @@ mod tests {
             Command::from_frame(frame),
             Err(CommandError::InvalidCommandName)
         );
+    }
+
+    #[test]
+    fn set_string_value() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("SET".into())),
+            RespFrame::BulkStrings(Some("key".into())),
+            RespFrame::BulkStrings(Some("value".into())),
+        ]);
+        assert_eq!(
+            Command::from_frame(frame),
+            Ok(Command::Set("key".into(), Value::String("value".into())))
+        );
+    }
+
+    #[test]
+    fn set_integer_value() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("SET".into())),
+            RespFrame::BulkStrings(Some("key".into())),
+            RespFrame::Integer(42),
+        ]);
+        assert_eq!(
+            Command::from_frame(frame),
+            Ok(Command::Set("key".into(), Value::Integer(42)))
+        );
+    }
+
+    #[test]
+    fn set_case_insensitive() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("set".into())),
+            RespFrame::BulkStrings(Some("k".into())),
+            RespFrame::BulkStrings(Some("v".into())),
+        ]);
+        assert_eq!(
+            Command::from_frame(frame),
+            Ok(Command::Set("k".into(), Value::String("v".into())))
+        );
+    }
+
+    #[test]
+    fn set_wrong_arity_too_few() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("SET".into())),
+            RespFrame::BulkStrings(Some("key".into())),
+        ]);
+        assert_eq!(Command::from_frame(frame), Err(CommandError::WrongArity));
+    }
+
+    #[test]
+    fn set_wrong_arity_too_many() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("SET".into())),
+            RespFrame::BulkStrings(Some("key".into())),
+            RespFrame::BulkStrings(Some("val".into())),
+            RespFrame::BulkStrings(Some("extra".into())),
+        ]);
+        assert_eq!(Command::from_frame(frame), Err(CommandError::WrongArity));
     }
 }

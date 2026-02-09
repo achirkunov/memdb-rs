@@ -2,14 +2,7 @@ use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
-#[derive(Clone)] // TODO: to remove
-enum Value {
-    String(String),
-    Integer(i64),
-    List(Vec<Value>),
-}
-
-//type Store = HashMap<String, Value>;
+use memdb_protocol::{Command, Response, Value};
 
 struct Store {
     data: HashMap<String,Value>,
@@ -53,21 +46,6 @@ impl Store {
     fn del(&mut self, key: &str) -> bool {
         self.data.remove(key).is_some()
     }
-}
-
-enum Command {
-    Ping,
-    Set(String, Value),
-    Get(String),
-    Del(String),
-}
-
-enum Response {
-    Pong,
-    Set(bool),
-    Get(Option<Value>),
-    Del(bool),
-    Error(String),
 }
 
 fn handle_client(stream: TcpStream) {

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::Read;
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
@@ -21,16 +22,17 @@ impl Store {
             Command::Ping => Response::Pong,
             Command::Set(key, value) => {
                 let was_new = self.set(&key, value);
-                Response::Set(was_new)
+                Response::OK
             },
-            Command::Get(key) => {
-                let value = self.get(&key);
-                Response::Get(value.cloned()) // TODO: We will need to avoid using Clone since we will serialize the response anyway
-            },
-            Command::Del(key) => {
-                let deleted = self.del(&key);
-                Response::Del(deleted)
-            },
+            _ => todo!()
+            // Command::Get(key) => {
+            //     let value = self.get(&key);
+            //     Response::Get(value.cloned()) // TODO: We will need to avoid using Clone since we will serialize the response anyway
+            // },
+            // Command::Del(key) => {
+            //     let deleted = self.del(&key);
+            //     Response::Del(deleted)
+            // },
         }
     }
 

@@ -26,9 +26,7 @@ pub enum CommandError {
 
 pub enum Response {
     Pong,
-    Set(bool),
-    Get(Option<Value>),
-    Del(bool),
+    OK,
     Error(String),
 }
 
@@ -74,6 +72,16 @@ impl Command {
                 Ok(Command::Set(key, value))
             }
             _ => Err(CommandError::UnknownCommand(name)),
+        }
+    }
+}
+
+impl Response {
+    pub fn to_frame(&self) -> RespFrame {
+        match self {
+            Response::Pong => RespFrame::SimpleString("PONG".to_string()),
+            Response::OK => RespFrame::SimpleString("OK".to_string()),
+            Response::Error(s) => RespFrame::SimpleError(s.clone()) // TODO: what can we do here?
         }
     }
 }

@@ -57,7 +57,12 @@ impl Command {
         };
 
         match name.as_str() {
-            "PING" => Ok(Command::Ping),
+            "PING" => {
+                if frames.len() > 2 {
+                    return Err(CommandError::WrongArity);
+                }
+                Ok(Command::Ping)
+            }
             "SET" => {
                 if frames.len() != 3 {
                     return Err(CommandError::WrongArity);
@@ -68,6 +73,20 @@ impl Command {
             },
             "COMMAND" => Ok(Command::Command),
             _ => Err(CommandError::UnknownCommand(name)),
+        }
+    }
+}
+
+impl std::fmt::Display for CommandError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {                                                                                                             
+            CommandError::WrongArity => {                                                                                  
+                write!(f, "ERR wrong number of arguments for command")
+            },
+            CommandError::UnknownCommand(name) => {
+                write!(f, "ERR unknown command '{}'", name)
+            },
+            _ => write!(f, "ERR {:?}", self)
         }
     }
 }

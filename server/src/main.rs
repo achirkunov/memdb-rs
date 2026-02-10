@@ -76,7 +76,7 @@ fn handle_client(mut stream: TcpStream) {
                         let response = match cmd {
                             Command::Ping => RespFrame::SimpleString("PONG".to_string()),
                             Command::Command => RespFrame::SimpleString("OK".to_string()),
-                            _ => RespFrame::SimpleError("ERR unknown command".to_string())
+                            _ => RespFrame::SimpleError("ERR command to be implemented".to_string())
                         };
                         //let frame = response.to_frame();
                         let bytes = response.marshal(); // if you have this method
@@ -84,7 +84,11 @@ fn handle_client(mut stream: TcpStream) {
 
                         // TODO: redis-cli sends COMMAND DOCS on startup to discover which commands the server supports
                     },
-                    Err(e) => eprintln!("command error: {:?}", e)
+                    Err(e) => {
+                        //let msg = format!("ERR: {:?}", e);
+                        let bytes = RespFrame::SimpleError(e.to_string()).marshal();
+                        stream.write_all(&bytes).unwrap();
+                    }
                 }
             },
             Err(_) => { eprintln!("Incomplete data"); break; }, // incomplete data

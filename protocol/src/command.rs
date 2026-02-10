@@ -10,6 +10,7 @@ pub enum Value {
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Ping,
+    Command,
     Set(String, Value),
     Get(String),
     Del(String),
@@ -70,7 +71,8 @@ impl Command {
                 let key = expect_bulk_string(&frames[1])?;
                 let value = frame_to_value(frames[2].clone())?;
                 Ok(Command::Set(key, value))
-            }
+            },
+            "COMMAND" => Ok(Command::Command),
             _ => Err(CommandError::UnknownCommand(name)),
         }
     }

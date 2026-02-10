@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
@@ -68,10 +68,19 @@ fn handle_client(mut stream: TcpStream) {
 
         // TODO: Try parsing frame from accumulated data (loop - multiple frames possible in one read)
         match RespFrame::parse_bytes(&data) {
-            Ok((frame,_)) => {
+            Ok((frame, remaining)) => {
+                data = remaining.to_vec();
                 match Command::from_frame(frame) {
                     Ok(cmd) => {
                         println!("Received cmd: {:?}", cmd);
+                        let response = match cmd {
+                            Command::Ping => Response::Pong,
+                            Command::Command => Response::OK,
+                            _ => Response::Error("unknown command".into())
+                        };
+                        let frame = response.to_frame();
+                        let bytes = frame.marshal(); // if you have this method
+                        stream.write_all(&bytes).unwrap();
 
                         // TODO: redis-cli sends COMMAND DOCS on startup to discover which commands the server supports
                     },

@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
-use memdb_protocol::{Command, RespFrame, Response, Value};
+use memdb_protocol::{Command, RespFrame, Value};
 
 struct Store {
     data: HashMap<String,Value>,
@@ -17,12 +17,12 @@ impl Store {
         }
     }
 
-    fn execute(&mut self, cmd: Command) -> Response {
+    fn execute(&mut self, cmd: Command) -> RespFrame {
         match cmd {
-            Command::Ping => Response::Pong,
+            Command::Ping => RespFrame::SimpleString("PONG".to_string()),
             Command::Set(key, value) => {
                 let was_new = self.set(&key, value);
-                Response::OK
+                RespFrame::SimpleString("OK".to_string())
             },
             _ => todo!()
             // Command::Get(key) => {
@@ -74,12 +74,12 @@ fn handle_client(mut stream: TcpStream) {
                     Ok(cmd) => {
                         println!("Received cmd: {:?}", cmd);
                         let response = match cmd {
-                            Command::Ping => Response::Pong,
-                            Command::Command => Response::OK,
-                            _ => Response::Error("unknown command".into())
+                            Command::Ping => RespFrame::SimpleString("PONG".to_string()),
+                            Command::Command => RespFrame::SimpleString("OK".to_string()),
+                            _ => RespFrame::SimpleError("ERR unknown command".to_string())
                         };
-                        let frame = response.to_frame();
-                        let bytes = frame.marshal(); // if you have this method
+                        //let frame = response.to_frame();
+                        let bytes = response.marshal(); // if you have this method
                         stream.write_all(&bytes).unwrap();
 
                         // TODO: redis-cli sends COMMAND DOCS on startup to discover which commands the server supports

@@ -25,12 +25,6 @@ pub enum CommandError {
     WrongArity,
 }
 
-pub enum Response {
-    Pong,
-    OK,
-    Error(String),
-}
-
 fn frame_to_value(frame: RespFrame) -> Result<Value, CommandError> {
     match frame {
         RespFrame::BulkStrings(Some(s)) | RespFrame::SimpleString(s) => Ok(Value::String(s)),
@@ -74,17 +68,6 @@ impl Command {
             },
             "COMMAND" => Ok(Command::Command),
             _ => Err(CommandError::UnknownCommand(name)),
-        }
-    }
-}
-
-impl Response {
-    pub fn to_frame(&self) -> RespFrame {
-        match self {
-            Response::Pong => RespFrame::SimpleString("PONG".to_string()),
-            Response::OK => RespFrame::SimpleString("OK".to_string()),
-            Response::Error(s) => RespFrame::SimpleError(s.clone()) // TODO: what can we do here?
-            // TODO: Error should be ERR if generic, otherwise a specific error (e.g. WRONGTYPE)
         }
     }
 }

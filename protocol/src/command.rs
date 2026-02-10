@@ -82,6 +82,7 @@ impl Response {
             Response::Pong => RespFrame::SimpleString("PONG".to_string()),
             Response::OK => RespFrame::SimpleString("OK".to_string()),
             Response::Error(s) => RespFrame::SimpleError(s.clone()) // TODO: what can we do here?
+            // TODO: Error should be ERR if generic, otherwise a specific error (e.g. WRONGTYPE)
         }
     }
 }

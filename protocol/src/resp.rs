@@ -28,7 +28,7 @@ impl RespFrame {
         Ok((&input[..pos], &input[pos + 2..] ))
     }
 
-    fn parse_bytes(input: &[u8]) -> Result<(RespFrame, &[u8]), ParseError> {
+    pub fn parse_bytes(input: &[u8]) -> Result<(RespFrame, &[u8]), ParseError> {
         if input.is_empty() {
             return Err(ParseError::Incomplete);
         }
@@ -91,7 +91,7 @@ impl RespFrame {
         }
     }
 
-    fn parse(s: &str) -> Result<Self, ParseError> {
+    pub fn parse(s: &str) -> Result<Self, ParseError> {
         let (frame, rest) = Self::parse_bytes(s.as_bytes())?;
         if !rest.is_empty() {
             return Err(ParseError::Incomplete);
@@ -99,7 +99,7 @@ impl RespFrame {
         Ok(frame)
     }
 
-    fn marshal(&self) -> Vec<u8> {
+    pub fn marshal(&self) -> Vec<u8> {
         match self {
             RespFrame::SimpleString(s) => format!("+{}\r\n", s).into_bytes(),
             RespFrame::SimpleError(s) => format!("-{}\r\n", s).into_bytes(),

@@ -3,7 +3,7 @@ use std::io::Read;
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
-use memdb_protocol::{Command, Response, Value};
+use memdb_protocol::{Command, RespFrame, Response, Value};
 
 struct Store {
     data: HashMap<String,Value>,
@@ -50,8 +50,38 @@ impl Store {
     }
 }
 
-fn handle_client(stream: TcpStream) {
+fn handle_client(mut stream: TcpStream) {
     // ...
+    let mut buf = [0u8; 1024];
+    let mut data = Vec::new();
+
+    loop {
+        // 1. Read chunk from stream
+        let n = match stream.read(&mut buf) {
+            Ok(0) => return, // client disconnected
+            Ok(n) => n,
+            Err(e) => { eprintln!("read error: {}", e); return; }
+        };
+        data.extend_from_slice(&buf[..n]); // why do we need this?
+        // See it as a string (RESP is mostly ASCII, so this is nice for debugging)
+        println!("received: {:?}", String::from_utf8_lossy(&data));
+
+        // TODO: Try parsing frame from accumulated data (loop - multiple frames possible in one read)
+        match RespFrame::parse_bytes(&data) {
+            Ok((frame,_)) => {
+                match Command::from_frame(frame) {
+                    Ok(cmd) => {
+                        println!("Received cmd: {:?}", cmd);
+
+                        // TODO: redis-cli sends COMMAND DOCS on startup to discover which commands the server supports
+                    },
+                    Err(e) => eprintln!("command error: {:?}", e)
+                }
+            },
+            Err(_) => { eprintln!("Incomplete data"); break; }, // incomplete data
+        }
+    }
+
 }
 
 // TODO: Replace with Box<dyn>

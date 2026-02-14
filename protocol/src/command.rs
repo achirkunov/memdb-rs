@@ -13,7 +13,7 @@ pub enum Command {
     Command,
     Set(String, Value),
     Get(String),
-    Del(String),
+    Del(Vec<String>), 
 }
 
 #[derive(Debug, PartialEq)]
@@ -77,6 +77,18 @@ impl Command {
                 }
                 let key = expect_bulk_string(&frames[1])?;
                 Ok(Command::Get(key))
+            },
+            "DEL" => {
+                if frames.len() < 2 {
+                    return Err(CommandError::WrongArity);
+                }
+                // DEL takes one or more keys and deletes them. It returns an integer (number of keys deleted)
+                let mut keys = Vec::new();
+                for frame in &frames[1..] {
+                    let key = expect_bulk_string(frame)?;
+                    keys.push(key);
+                }
+                Ok(Command::Del(keys))
             },
             "COMMAND" => Ok(Command::Command),
             _ => Err(CommandError::UnknownCommand(name)),
@@ -209,5 +221,51 @@ mod tests {
             RespFrame::BulkStrings(Some("extra".into())),
         ]);
         assert_eq!(Command::from_frame(frame), Err(CommandError::WrongArity));
+    }
+
+    #[test]
+    fn del_single_key() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("DEL".into())),
+            RespFrame::BulkStrings(Some("mykey".into())),
+        ]);
+        assert_eq!(
+            Command::from_frame(frame),
+            Ok(Command::Del(vec!["mykey".into()]))
+        );
+    }
+
+    #[test]
+    fn del_multiple_keys() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("DEL".into())),
+            RespFrame::BulkStrings(Some("k1".into())),
+            RespFrame::BulkStrings(Some("k2".into())),
+            RespFrame::BulkStrings(Some("k3".into())),
+        ]);
+        assert_eq!(
+            Command::from_frame(frame),
+            Ok(Command::Del(vec!["k1".into(), "k2".into(), "k3".into()]))
+        );
+    }
+
+    #[test]
+    fn del_no_keys() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("DEL".into())),
+        ]);
+        assert_eq!(Command::from_frame(frame), Err(CommandError::WrongArity));
+    }
+
+    #[test]
+    fn del_case_insensitive() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("del".into())),
+            RespFrame::BulkStrings(Some("mykey".into())),
+        ]);
+        assert_eq!(
+            Command::from_frame(frame),
+            Ok(Command::Del(vec!["mykey".into()]))
+        );
     }
 }

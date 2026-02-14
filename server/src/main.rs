@@ -32,16 +32,12 @@ impl Store {
                     Some(_) => RespFrame::SimpleError("WRONGTYPE Operation against a key holding wrong kind of value".to_string()),
                     None => RespFrame::BulkStrings(None), // $-1\r\n
                 }
-            }
+            },
+            Command::Del(keys) => {
+                let count = keys.into_iter().filter(|key| self.del(key)).count();
+                RespFrame::Integer(count as i64)
+            },
             _ => todo!()
-            // Command::Get(key) => {
-            //     let value = self.get(&key);
-            //     Response::Get(value.cloned()) // TODO: We will need to avoid using Clone since we will serialize the response anyway
-            // },
-            // Command::Del(key) => {
-            //     let deleted = self.del(&key);
-            //     Response::Del(deleted)
-            // },
         }
     }
 

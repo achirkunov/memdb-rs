@@ -1,59 +1,12 @@
-use std::collections::HashMap;
+mod store;
+
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::thread;
 use std::sync::{Arc, Mutex};
+use std::thread;
 
-use memdb_protocol::{Command, RespFrame, Value};
-
-struct Store {
-    data: HashMap<String,Value>,
-}
-
-impl Store {
-
-    fn new() -> Self {
-        Self {
-            data: HashMap::new()
-        }
-    }
-
-    fn execute(&mut self, cmd: Command) -> RespFrame {
-        match cmd {
-            Command::Ping => RespFrame::SimpleString("PONG".to_string()),
-            Command::Command => RespFrame::SimpleString("OK".to_string()),
-            Command::Set(key, value) => {
-                self.set(&key, value);
-                RespFrame::SimpleString("OK".to_string())
-            },
-            Command::Get(key) => {
-                match self.get(&key) {
-                    Some(Value::String(s)) => RespFrame::BulkStrings(Some(s.clone())),
-                    Some(_) => RespFrame::SimpleError("WRONGTYPE Operation against a key holding wrong kind of value".to_string()),
-                    None => RespFrame::BulkStrings(None), // $-1\r\n
-                }
-            },
-            Command::Del(keys) => {
-                let count = keys.into_iter().filter(|key| self.del(key)).count();
-                RespFrame::Integer(count as i64)
-            },
-            _ => todo!()
-        }
-    }
-
-    fn set(&mut self, key: &str, value: Value) -> bool {
-        let was_new = self.data.insert(key.to_string(), value).is_none();
-        was_new
-    }
-
-    fn get(&self, key: &str) -> Option<&Value> {
-        self.data.get(key)
-    }
-
-    fn del(&mut self, key: &str) -> bool {
-        self.data.remove(key).is_some()
-    }
-}
+use memdb_protocol::{Command, RespFrame};
+use store::Store;
 
 fn handle_client(mut stream: TcpStream, store: Arc<Mutex<Store>>) {
     // ...
@@ -95,7 +48,6 @@ fn handle_client(mut stream: TcpStream, store: Arc<Mutex<Store>>) {
             Err(_) => { eprintln!("Incomplete data"); break; }, // incomplete data
         }
     }
-
 }
 
 // TODO: Replace with Box<dyn>
@@ -126,7 +78,6 @@ fn main() -> std::io::Result<()> {
     // Mutex: exclusive access for mutation
     let store = Arc::new(Mutex::new(Store::new()));
 
-
     let addr = format!("{}:{}", bind, port);
     println!("listening on {}", addr);
     let listener = TcpListener::bind(&addr)?;
@@ -144,10 +95,4 @@ fn main() -> std::io::Result<()> {
     }
 
     Ok(())
-
-
 }
-
-
-
-

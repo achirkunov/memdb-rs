@@ -24,28 +24,29 @@ fn handle_client(mut stream: TcpStream, store: Arc<Mutex<Store>>) {
         // See it as a string (RESP is mostly ASCII, so this is nice for debugging)
         println!("received: {:?}", String::from_utf8_lossy(&data));
 
-        // TODO: Try parsing frame from accumulated data (loop - multiple frames possible in one read)
-        match RespFrame::parse_bytes(&data) {
-            Ok((frame, remaining)) => {
-                data = remaining.to_vec();
-                match Command::from_frame(frame) {
-                    Ok(cmd) => {
-                        println!("Received cmd: {:?}", cmd);
-                        let response = {
-                            let mut store = store.lock().unwrap();
-                            store.execute(cmd)
-                        }; // lock released here
-                        let bytes = response.marshal();
-                        stream.write_all(&bytes).unwrap();
-                    },
-                    Err(e) => {
-                        //let msg = format!("ERR: {:?}", e);
-                        let bytes = RespFrame::SimpleError(e.to_string()).marshal();
-                        stream.write_all(&bytes).unwrap();
+        // Drain all complete frames from the buffer before blocking on next read
+        loop {
+            match RespFrame::parse_bytes(&data) {
+                Ok((frame, remaining)) => {
+                    data = remaining.to_vec();
+                    match Command::from_frame(frame) {
+                        Ok(cmd) => {
+                            println!("Received cmd: {:?}", cmd);
+                            let response = {
+                                let mut store = store.lock().unwrap();
+                                store.execute(cmd)
+                            }; // lock released here
+                            let bytes = response.marshal();
+                            stream.write_all(&bytes).unwrap();
+                        },
+                        Err(e) => {
+                            let bytes = RespFrame::SimpleError(e.to_string()).marshal();
+                            stream.write_all(&bytes).unwrap();
+                        }
                     }
-                }
-            },
-            Err(_) => { eprintln!("Incomplete data"); break; }, // incomplete data
+                },
+                Err(_) => break, // incomplete data, need more bytes
+            }
         }
     }
 }

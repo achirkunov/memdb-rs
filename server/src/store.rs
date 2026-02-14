@@ -33,7 +33,7 @@ impl Store {
                 let count = keys.into_iter().filter(|key| self.del(key)).count();
                 RespFrame::Integer(count as i64)
             },
-            _ => todo!()
+            //_ => todo!()
         }
     }
 

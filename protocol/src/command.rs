@@ -71,6 +71,13 @@ impl Command {
                 let value = frame_to_value(frames[2].clone())?;
                 Ok(Command::Set(key, value))
             },
+            "GET" => {
+                if frames.len() != 2 {
+                    return Err(CommandError::WrongArity);
+                }
+                let key = expect_bulk_string(&frames[1])?;
+                Ok(Command::Get(key))
+            },
             "COMMAND" => Ok(Command::Command),
             _ => Err(CommandError::UnknownCommand(name)),
         }

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
+use std::sync::{Arc, Mutex};
 
 use memdb_protocol::{Command, RespFrame, Value};
 
@@ -20,10 +21,18 @@ impl Store {
     fn execute(&mut self, cmd: Command) -> RespFrame {
         match cmd {
             Command::Ping => RespFrame::SimpleString("PONG".to_string()),
+            Command::Command => RespFrame::SimpleString("OK".to_string()),
             Command::Set(key, value) => {
-                let was_new = self.set(&key, value);
+                self.set(&key, value);
                 RespFrame::SimpleString("OK".to_string())
             },
+            Command::Get(key) => {
+                match self.get(&key) {
+                    Some(Value::String(s)) => RespFrame::BulkStrings(Some(s.clone())),
+                    Some(_) => RespFrame::SimpleError("WRONGTYPE Operation against a key holding wrong kind of value".to_string()),
+                    None => RespFrame::BulkStrings(None), // $-1\r\n
+                }
+            }
             _ => todo!()
             // Command::Get(key) => {
             //     let value = self.get(&key);
@@ -50,7 +59,7 @@ impl Store {
     }
 }
 
-fn handle_client(mut stream: TcpStream) {
+fn handle_client(mut stream: TcpStream, store: Arc<Mutex<Store>>) {
     // ...
     let mut buf = [0u8; 1024];
     let mut data = Vec::new();
@@ -73,16 +82,12 @@ fn handle_client(mut stream: TcpStream) {
                 match Command::from_frame(frame) {
                     Ok(cmd) => {
                         println!("Received cmd: {:?}", cmd);
-                        let response = match cmd {
-                            Command::Ping => RespFrame::SimpleString("PONG".to_string()),
-                            Command::Command => RespFrame::SimpleString("OK".to_string()),
-                            _ => RespFrame::SimpleError("ERR command to be implemented".to_string())
-                        };
-                        //let frame = response.to_frame();
-                        let bytes = response.marshal(); // if you have this method
+                        let response = {
+                            let mut store = store.lock().unwrap();
+                            store.execute(cmd)
+                        }; // lock released here
+                        let bytes = response.marshal();
                         stream.write_all(&bytes).unwrap();
-
-                        // TODO: redis-cli sends COMMAND DOCS on startup to discover which commands the server supports
                     },
                     Err(e) => {
                         //let msg = format!("ERR: {:?}", e);
@@ -120,7 +125,11 @@ fn main() -> std::io::Result<()> {
         i += 1;
     }
 
-    let mut store = Store::new();
+    // We have one Store but multiple threads (one per client)
+    // Arc: shared ownership across threads (ref-counted pointer)
+    // Mutex: exclusive access for mutation
+    let store = Arc::new(Mutex::new(Store::new()));
+
 
     let addr = format!("{}:{}", bind, port);
     println!("listening on {}", addr);
@@ -129,8 +138,9 @@ fn main() -> std::io::Result<()> {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                thread::spawn(|| {
-                    handle_client(stream);
+                let store = Arc::clone(&store); // increment ref count
+                thread::spawn(move || {
+                    handle_client(stream, store);
                 });
             },
             Err(e) => eprintln!("connection failed: {}", e),

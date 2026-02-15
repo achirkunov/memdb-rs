@@ -13,7 +13,8 @@ pub enum Command {
     Command,
     Set(String, Value),
     Get(String),
-    Del(Vec<String>), 
+    Del(Vec<String>),
+    Echo(String),
 }
 
 #[derive(Debug, PartialEq)]
@@ -94,6 +95,13 @@ impl Command {
                     keys.push(key);
                 }
                 Ok(Command::Del(keys))
+            },
+            "ECHO" => {
+                if frames.len() != 2 {
+                    return Err(CommandError::WrongArity);
+                }
+                let msg = expect_bulk_string(&frames[1])?;
+                Ok(Command::Echo(msg))
             },
             "COMMAND" => Ok(Command::Command),
             _ => Err(CommandError::UnknownCommand(name)),
@@ -291,5 +299,41 @@ mod tests {
             Command::from_frame(frame),
             Ok(Command::Del(vec!["mykey".into()]))
         );
+    }
+
+    #[test]
+    fn echo_basic() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("ECHO".into())),
+            RespFrame::BulkStrings(Some("hello".into())),
+        ]);
+        assert_eq!(Command::from_frame(frame), Ok(Command::Echo("hello".into())));
+    }
+
+    #[test]
+    fn echo_case_insensitive() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("echo".into())),
+            RespFrame::BulkStrings(Some("world".into())),
+        ]);
+        assert_eq!(Command::from_frame(frame), Ok(Command::Echo("world".into())));
+    }
+
+    #[test]
+    fn echo_no_args() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("ECHO".into())),
+        ]);
+        assert_eq!(Command::from_frame(frame), Err(CommandError::WrongArity));
+    }
+
+    #[test]
+    fn echo_too_many_args() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("ECHO".into())),
+            RespFrame::BulkStrings(Some("a".into())),
+            RespFrame::BulkStrings(Some("b".into())),
+        ]);
+        assert_eq!(Command::from_frame(frame), Err(CommandError::WrongArity));
     }
 }

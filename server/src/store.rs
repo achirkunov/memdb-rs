@@ -34,7 +34,7 @@ impl Store {
                 let count = keys.into_iter().filter(|key| self.del(key)).count();
                 RespFrame::Integer(count as i64)
             },
-            //_ => todo!()
+            Command::Echo(msg) => RespFrame::BulkStrings(Some(msg)),
         }
     }
 

@@ -81,6 +81,23 @@ impl Store {
             None => false,
         }
     }
+
+    pub fn evict_expired_sample(&mut self, sample_size: usize) -> usize {
+        let now = Instant::now();
+        let expired_keys: Vec<String> = self
+            .expires
+            .iter()
+            .take(sample_size)
+            .filter(|(_, deadline)| now >= **deadline)
+            .map(|(key, _)| key.clone())
+            .collect();
+        let count = expired_keys.len();
+        for key in &expired_keys {
+            self.data.remove(key);
+            self.expires.remove(key);
+        }
+        count
+    }
 }
 
 #[cfg(test)]
@@ -204,5 +221,42 @@ mod tests {
             store.execute(Command::Get("k".into())),
             RespFrame::BulkStrings(Some("v2".into()))
         );
+    }
+
+    #[test]
+    fn evict_expired_sample_removes_expired() {
+        let mut store = Store::new();
+        set_ex(&mut store, "k1", "v", 1);
+        set_ex(&mut store, "k2", "v", 1);
+        set_ex(&mut store, "k3", "v", 1);
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        assert_eq!(store.evict_expired_sample(20), 3);
+        assert_eq!(store.data.len(), 0);
+        assert_eq!(store.expires.len(), 0);
+    }
+
+    #[test]
+    fn evict_expired_sample_preserves_unexpired() {
+        let mut store = Store::new();
+        set_ex(&mut store, "k1", "v1", 1);
+        set_ex(&mut store, "k2", "v2", 10);
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        assert_eq!(store.evict_expired_sample(20), 1);
+        assert_eq!(store.data.len(), 1);
+        assert!(store.data.contains_key("k2"));
+        assert_eq!(store.expires.len(), 1);
+    }
+
+    #[test]
+    fn evict_expired_sample_respects_sample_size() {
+        let mut store = Store::new();
+        for i in 0..5 {
+            set_ex(&mut store, &format!("k{}", i), "v", 1);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        assert_eq!(store.evict_expired_sample(3), 3);
+        // 2 expired keys remain because we only sampled 3
+        assert_eq!(store.data.len(), 2);
+        assert_eq!(store.expires.len(), 2);
     }
 }

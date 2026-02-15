@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use memdb_protocol::{Command, RespFrame};
 use store::Store;
@@ -75,6 +76,24 @@ fn main() -> std::io::Result<()> {
     // Arc: shared ownership across threads (ref-counted pointer)
     // Mutex: exclusive access for mutation
     let store = Arc::new(Mutex::new(Store::new()));
+
+    // Active expiration: background thread samples expired keys periodically
+    let expiry_store = Arc::clone(&store);
+    thread::spawn(move || {
+        loop {
+            thread::sleep(Duration::from_millis(100));
+            let start = Instant::now();
+            loop {
+                let expired = expiry_store.lock().unwrap().evict_expired_sample(20);
+                if expired * 4 <= 20 {
+                    break;
+                }
+                if start.elapsed() > Duration::from_millis(25) {
+                    break;
+                }
+            }
+        }
+    });
 
     let addr = format!("{}:{}", bind, port);
     println!("listening on {}", addr);

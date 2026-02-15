@@ -1,3 +1,4 @@
+mod aof;
 mod store;
 
 use std::io::{Read, Write};
@@ -6,10 +7,15 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use aof::AofWriter;
 use memdb_protocol::{Command, RespFrame};
 use store::Store;
 
-fn handle_client(mut stream: TcpStream, store: Arc<Mutex<Store>>) {
+fn handle_client(
+    mut stream: TcpStream,
+    store: Arc<Mutex<Store>>,
+    aof: Option<Arc<Mutex<AofWriter>>>,
+) {
     // ...
     let mut buf = [0u8; 1024];
     let mut data = Vec::new();
@@ -31,6 +37,16 @@ fn handle_client(mut stream: TcpStream, store: Arc<Mutex<Store>>) {
         // Drain all complete frames from the buffer before blocking on next read
         while let Ok((frame, remaining)) = RespFrame::parse_bytes(&data) {
             data = remaining.to_vec();
+
+            // Append write commands to AOF before executing
+            if let Some(ref aof) = aof
+                && AofWriter::is_write_command(&frame)
+                && let Err(e) = aof.lock().unwrap().write(&frame)
+            {
+                eprintln!("AOF write error: {}", e);
+                continue;
+            }
+
             match Command::from_frame(frame) {
                 Ok(cmd) => {
                     println!("Received cmd: {:?}", cmd);
@@ -54,6 +70,8 @@ fn handle_client(mut stream: TcpStream, store: Arc<Mutex<Store>>) {
 fn main() -> std::io::Result<()> {
     let mut port = "6379".to_string();
     let mut bind = "127.0.0.1".to_string();
+    let mut appendonly = false;
+    let mut aof_file = "appendonly.aof".to_string();
 
     let args: Vec<String> = std::env::args().collect();
     let mut i = 1;
@@ -67,15 +85,35 @@ fn main() -> std::io::Result<()> {
                 i += 1;
                 bind = args[i].clone();
             }
+            "--appendonly" => {
+                appendonly = true;
+            }
+            "--aof-file" => {
+                i += 1;
+                aof_file = args[i].clone();
+            }
             _ => eprintln!("unknown arg: {}", args[i]),
         }
         i += 1;
     }
 
-    // We have one Store but multiple threads (one per client)
+    let mut store = Store::new();
+
+    // Replay AOF to rebuild dataset before accepting connections
+    let aof: Option<Arc<Mutex<AofWriter>>> = if appendonly {
+        let count = AofWriter::replay(&aof_file, &mut store)?;
+        println!(
+            "AOF enabled, file: {}, replayed {} commands",
+            aof_file, count
+        );
+        Some(Arc::new(Mutex::new(AofWriter::new(&aof_file)?)))
+    } else {
+        None
+    };
+
     // Arc: shared ownership across threads (ref-counted pointer)
     // Mutex: exclusive access for mutation
-    let store = Arc::new(Mutex::new(Store::new()));
+    let store = Arc::new(Mutex::new(store));
 
     // Active expiration: background thread samples expired keys periodically
     let expiry_store = Arc::clone(&store);
@@ -102,9 +140,10 @@ fn main() -> std::io::Result<()> {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                let store = Arc::clone(&store); // increment ref count
+                let store = Arc::clone(&store);
+                let aof = aof.as_ref().map(Arc::clone);
                 thread::spawn(move || {
-                    handle_client(stream, store);
+                    handle_client(stream, store, aof);
                 });
             }
             Err(e) => eprintln!("connection failed: {}", e),

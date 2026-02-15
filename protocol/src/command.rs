@@ -11,7 +11,7 @@ pub enum Value {
 pub enum Command {
     Ping(Option<String>),
     Command,
-    Set(String, Value),
+    Set(String, Value, Option<u64>),
     Get(String),
     Del(Vec<String>),
     Echo(String),
@@ -24,6 +24,9 @@ pub enum CommandError {
     InvalidCommandName,
     UnknownCommand(String),
     WrongArity,
+    InvalidOption(String),
+    NotAnInteger,
+    InvalidExpireTime,
 }
 
 fn frame_to_value(frame: RespFrame) -> Result<Value, CommandError> {
@@ -70,12 +73,28 @@ impl Command {
                 Ok(Command::Ping(msg))
             }
             "SET" => {
-                if frames.len() != 3 {
+                if frames.len() != 3 && frames.len() != 5 {
                     return Err(CommandError::WrongArity);
                 }
                 let key = expect_bulk_string(&frames[1])?;
                 let value = frame_to_value(frames[2].clone())?;
-                Ok(Command::Set(key, value))
+                let ex = if frames.len() == 5 {
+                    let option_name = expect_bulk_string(&frames[3])?;
+                    if !option_name.eq_ignore_ascii_case("EX") {
+                        return Err(CommandError::InvalidOption(option_name));
+                    }
+                    let secs_str = expect_bulk_string(&frames[4])?;
+                    let secs: u64 = secs_str
+                        .parse()
+                        .map_err(|_| CommandError::InvalidExpireTime)?;
+                    if secs == 0 {
+                        return Err(CommandError::InvalidExpireTime);
+                    }
+                    Some(secs)
+                } else {
+                    None
+                };
+                Ok(Command::Set(key, value, ex))
             }
             "GET" => {
                 if frames.len() != 2 {
@@ -117,6 +136,12 @@ impl std::fmt::Display for CommandError {
             }
             CommandError::UnknownCommand(name) => {
                 write!(f, "ERR unknown command '{}'", name)
+            }
+            CommandError::InvalidOption(opt) => {
+                write!(f, "ERR unsupported option '{}'", opt)
+            }
+            CommandError::InvalidExpireTime => {
+                write!(f, "ERR invalid expire time in 'set' command")
             }
             _ => write!(f, "ERR {:?}", self),
         }
@@ -200,7 +225,11 @@ mod tests {
         ]);
         assert_eq!(
             Command::from_frame(frame),
-            Ok(Command::Set("key".into(), Value::String("value".into())))
+            Ok(Command::Set(
+                "key".into(),
+                Value::String("value".into()),
+                None
+            ))
         );
     }
 
@@ -213,7 +242,7 @@ mod tests {
         ]);
         assert_eq!(
             Command::from_frame(frame),
-            Ok(Command::Set("key".into(), Value::Integer(42)))
+            Ok(Command::Set("key".into(), Value::Integer(42), None))
         );
     }
 
@@ -226,7 +255,7 @@ mod tests {
         ]);
         assert_eq!(
             Command::from_frame(frame),
-            Ok(Command::Set("k".into(), Value::String("v".into())))
+            Ok(Command::Set("k".into(), Value::String("v".into()), None))
         );
     }
 
@@ -330,6 +359,111 @@ mod tests {
             RespFrame::BulkStrings(Some("ECHO".into())),
             RespFrame::BulkStrings(Some("a".into())),
             RespFrame::BulkStrings(Some("b".into())),
+        ]);
+        assert_eq!(Command::from_frame(frame), Err(CommandError::WrongArity));
+    }
+
+    #[test]
+    fn set_with_ex() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("SET".into())),
+            RespFrame::BulkStrings(Some("key".into())),
+            RespFrame::BulkStrings(Some("val".into())),
+            RespFrame::BulkStrings(Some("EX".into())),
+            RespFrame::BulkStrings(Some("10".into())),
+        ]);
+        assert_eq!(
+            Command::from_frame(frame),
+            Ok(Command::Set(
+                "key".into(),
+                Value::String("val".into()),
+                Some(10)
+            ))
+        );
+    }
+
+    #[test]
+    fn set_with_ex_case_insensitive() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("SET".into())),
+            RespFrame::BulkStrings(Some("k".into())),
+            RespFrame::BulkStrings(Some("v".into())),
+            RespFrame::BulkStrings(Some("ex".into())),
+            RespFrame::BulkStrings(Some("5".into())),
+        ]);
+        assert_eq!(
+            Command::from_frame(frame),
+            Ok(Command::Set("k".into(), Value::String("v".into()), Some(5)))
+        );
+    }
+
+    #[test]
+    fn set_ex_not_a_number() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("SET".into())),
+            RespFrame::BulkStrings(Some("k".into())),
+            RespFrame::BulkStrings(Some("v".into())),
+            RespFrame::BulkStrings(Some("EX".into())),
+            RespFrame::BulkStrings(Some("abc".into())),
+        ]);
+        assert_eq!(
+            Command::from_frame(frame),
+            Err(CommandError::InvalidExpireTime)
+        );
+    }
+
+    #[test]
+    fn set_ex_zero() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("SET".into())),
+            RespFrame::BulkStrings(Some("k".into())),
+            RespFrame::BulkStrings(Some("v".into())),
+            RespFrame::BulkStrings(Some("EX".into())),
+            RespFrame::BulkStrings(Some("0".into())),
+        ]);
+        assert_eq!(
+            Command::from_frame(frame),
+            Err(CommandError::InvalidExpireTime)
+        );
+    }
+
+    #[test]
+    fn set_ex_negative() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("SET".into())),
+            RespFrame::BulkStrings(Some("k".into())),
+            RespFrame::BulkStrings(Some("v".into())),
+            RespFrame::BulkStrings(Some("EX".into())),
+            RespFrame::BulkStrings(Some("-1".into())),
+        ]);
+        assert_eq!(
+            Command::from_frame(frame),
+            Err(CommandError::InvalidExpireTime)
+        );
+    }
+
+    #[test]
+    fn set_unknown_option() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("SET".into())),
+            RespFrame::BulkStrings(Some("k".into())),
+            RespFrame::BulkStrings(Some("v".into())),
+            RespFrame::BulkStrings(Some("PX".into())),
+            RespFrame::BulkStrings(Some("10".into())),
+        ]);
+        assert_eq!(
+            Command::from_frame(frame),
+            Err(CommandError::InvalidOption("PX".into()))
+        );
+    }
+
+    #[test]
+    fn set_wrong_arity_four_frames() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("SET".into())),
+            RespFrame::BulkStrings(Some("k".into())),
+            RespFrame::BulkStrings(Some("v".into())),
+            RespFrame::BulkStrings(Some("EX".into())),
         ]);
         assert_eq!(Command::from_frame(frame), Err(CommandError::WrongArity));
     }

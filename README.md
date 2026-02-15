@@ -1,5 +1,7 @@
 # memdb-rs
 
+[![CI](https://github.com/achirkunov/memdb-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/achirkunov/memdb-rs/actions/workflows/ci.yml)
+
 An in-memory key-value store that speaks the Redis RESP protocol.
 
 ## Running

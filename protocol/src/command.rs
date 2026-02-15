@@ -76,14 +76,14 @@ impl Command {
                 let key = expect_bulk_string(&frames[1])?;
                 let value = frame_to_value(frames[2].clone())?;
                 Ok(Command::Set(key, value))
-            },
+            }
             "GET" => {
                 if frames.len() != 2 {
                     return Err(CommandError::WrongArity);
                 }
                 let key = expect_bulk_string(&frames[1])?;
                 Ok(Command::Get(key))
-            },
+            }
             "DEL" => {
                 if frames.len() < 2 {
                     return Err(CommandError::WrongArity);
@@ -95,14 +95,14 @@ impl Command {
                     keys.push(key);
                 }
                 Ok(Command::Del(keys))
-            },
+            }
             "ECHO" => {
                 if frames.len() != 2 {
                     return Err(CommandError::WrongArity);
                 }
                 let msg = expect_bulk_string(&frames[1])?;
                 Ok(Command::Echo(msg))
-            },
+            }
             "COMMAND" => Ok(Command::Command),
             _ => Err(CommandError::UnknownCommand(name)),
         }
@@ -111,14 +111,14 @@ impl Command {
 
 impl std::fmt::Display for CommandError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {                                                                                                             
-            CommandError::WrongArity => {                                                                                  
+        match self {
+            CommandError::WrongArity => {
                 write!(f, "ERR wrong number of arguments for command")
-            },
+            }
             CommandError::UnknownCommand(name) => {
                 write!(f, "ERR unknown command '{}'", name)
-            },
-            _ => write!(f, "ERR {:?}", self)
+            }
+            _ => write!(f, "ERR {:?}", self),
         }
     }
 }
@@ -129,9 +129,7 @@ mod tests {
 
     #[test]
     fn ping_from_frame() {
-        let frame = RespFrame::Arrays(vec![
-            RespFrame::BulkStrings(Some("PING".into())),
-        ]);
+        let frame = RespFrame::Arrays(vec![RespFrame::BulkStrings(Some("PING".into()))]);
         assert_eq!(Command::from_frame(frame), Ok(Command::Ping(None)));
     }
 
@@ -141,7 +139,10 @@ mod tests {
             RespFrame::BulkStrings(Some("PING".into())),
             RespFrame::BulkStrings(Some("hello".into())),
         ]);
-        assert_eq!(Command::from_frame(frame), Ok(Command::Ping(Some("hello".into()))));
+        assert_eq!(
+            Command::from_frame(frame),
+            Ok(Command::Ping(Some("hello".into())))
+        );
     }
 
     #[test]
@@ -156,9 +157,7 @@ mod tests {
 
     #[test]
     fn ping_case_insensitive() {
-        let frame = RespFrame::Arrays(vec![
-            RespFrame::BulkStrings(Some("ping".into())),
-        ]);
+        let frame = RespFrame::Arrays(vec![RespFrame::BulkStrings(Some("ping".into()))]);
         assert_eq!(Command::from_frame(frame), Ok(Command::Ping(None)));
     }
 
@@ -176,9 +175,7 @@ mod tests {
 
     #[test]
     fn unknown_command() {
-        let frame = RespFrame::Arrays(vec![
-            RespFrame::BulkStrings(Some("FOOBAR".into())),
-        ]);
+        let frame = RespFrame::Arrays(vec![RespFrame::BulkStrings(Some("FOOBAR".into()))]);
         assert_eq!(
             Command::from_frame(frame),
             Err(CommandError::UnknownCommand("FOOBAR".into()))
@@ -187,9 +184,7 @@ mod tests {
 
     #[test]
     fn invalid_command_name() {
-        let frame = RespFrame::Arrays(vec![
-            RespFrame::Integer(42),
-        ]);
+        let frame = RespFrame::Arrays(vec![RespFrame::Integer(42)]);
         assert_eq!(
             Command::from_frame(frame),
             Err(CommandError::InvalidCommandName)
@@ -283,9 +278,7 @@ mod tests {
 
     #[test]
     fn del_no_keys() {
-        let frame = RespFrame::Arrays(vec![
-            RespFrame::BulkStrings(Some("DEL".into())),
-        ]);
+        let frame = RespFrame::Arrays(vec![RespFrame::BulkStrings(Some("DEL".into()))]);
         assert_eq!(Command::from_frame(frame), Err(CommandError::WrongArity));
     }
 
@@ -307,7 +300,10 @@ mod tests {
             RespFrame::BulkStrings(Some("ECHO".into())),
             RespFrame::BulkStrings(Some("hello".into())),
         ]);
-        assert_eq!(Command::from_frame(frame), Ok(Command::Echo("hello".into())));
+        assert_eq!(
+            Command::from_frame(frame),
+            Ok(Command::Echo("hello".into()))
+        );
     }
 
     #[test]
@@ -316,14 +312,15 @@ mod tests {
             RespFrame::BulkStrings(Some("echo".into())),
             RespFrame::BulkStrings(Some("world".into())),
         ]);
-        assert_eq!(Command::from_frame(frame), Ok(Command::Echo("world".into())));
+        assert_eq!(
+            Command::from_frame(frame),
+            Ok(Command::Echo("world".into()))
+        );
     }
 
     #[test]
     fn echo_no_args() {
-        let frame = RespFrame::Arrays(vec![
-            RespFrame::BulkStrings(Some("ECHO".into())),
-        ]);
+        let frame = RespFrame::Arrays(vec![RespFrame::BulkStrings(Some("ECHO".into()))]);
         assert_eq!(Command::from_frame(frame), Err(CommandError::WrongArity));
     }
 

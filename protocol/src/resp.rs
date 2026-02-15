@@ -13,19 +13,20 @@ pub enum ParseError {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RespFrame {
-    SimpleString(String), // +
-    SimpleError(String), // -
-    Integer(i64), // :
+    SimpleString(String),        // +
+    SimpleError(String),         // -
+    Integer(i64),                // :
     BulkStrings(Option<String>), // $
-    Arrays(Vec<RespFrame>), // *
+    Arrays(Vec<RespFrame>),      // *
 }
 
 impl RespFrame {
-
-
-    fn parse_line(input: &[u8]) -> Result<(&[u8],&[u8]), ParseError> {
-        let pos = input.windows(2).position(|w| w == b"\r\n").ok_or(ParseError::MissingCLRF)?;
-        Ok((&input[..pos], &input[pos + 2..] ))
+    fn parse_line(input: &[u8]) -> Result<(&[u8], &[u8]), ParseError> {
+        let pos = input
+            .windows(2)
+            .position(|w| w == b"\r\n")
+            .ok_or(ParseError::MissingCLRF)?;
+        Ok((&input[..pos], &input[pos + 2..]))
     }
 
     pub fn parse_bytes(input: &[u8]) -> Result<(RespFrame, &[u8]), ParseError> {
@@ -36,47 +37,49 @@ impl RespFrame {
         match first {
             b'+' => {
                 let (data, rest) = Self::parse_line(rest)?;
-                let data = std::str::from_utf8(data).map_err(|_| ParseError::Incomplete )?;
+                let data = std::str::from_utf8(data).map_err(|_| ParseError::Incomplete)?;
                 Ok((RespFrame::SimpleString(data.to_string()), rest))
-            },
+            }
             b'-' => {
                 let (data, rest) = Self::parse_line(rest)?;
-                let data = std::str::from_utf8(data).map_err(|_| ParseError::InvalidUTF8 )?;
+                let data = std::str::from_utf8(data).map_err(|_| ParseError::InvalidUTF8)?;
                 Ok((RespFrame::SimpleError(data.to_string()), rest))
-            },
+            }
             b':' => {
                 let (data, rest) = Self::parse_line(rest)?;
-                let data = std::str::from_utf8(data).map_err(|_| ParseError::InvalidUTF8 )?.parse::<i64>().map_err(|_| ParseError::InvalidInteger)?;
+                let data = std::str::from_utf8(data)
+                    .map_err(|_| ParseError::InvalidUTF8)?
+                    .parse::<i64>()
+                    .map_err(|_| ParseError::InvalidInteger)?;
                 Ok((RespFrame::Integer(data), rest))
-            },
+            }
             b'$' => {
                 let (data, rest) = Self::parse_line(rest)?;
-                let data = std::str::from_utf8(data).map_err(|_| ParseError::InvalidUTF8 )?;
+                let data = std::str::from_utf8(data).map_err(|_| ParseError::InvalidUTF8)?;
                 // The spec uses a 512 MB defauolt max for bulk strings, so usize is enough
-                let len: i64 = data.parse().map_err(|_| ParseError::InvalidInteger )?;
+                let len: i64 = data.parse().map_err(|_| ParseError::InvalidInteger)?;
                 if len == -1 {
-                    return Ok((RespFrame::BulkStrings(None), rest))
+                    return Ok((RespFrame::BulkStrings(None), rest));
                 }
                 let len = len as usize;
                 if rest.len() < len + 2 {
                     return Err(ParseError::LengthMismatch);
                 }
-                if &rest[len..len+2] != b"\r\n" {
+                if &rest[len..len + 2] != b"\r\n" {
                     return Err(ParseError::LengthMismatch);
                 }
-                let data = std::str::from_utf8(&rest[..len]).map_err(|_| ParseError::InvalidUTF8 )?;
+                let data =
+                    std::str::from_utf8(&rest[..len]).map_err(|_| ParseError::InvalidUTF8)?;
                 let rest = &rest[len + 2..];
                 Ok((RespFrame::BulkStrings(Some(data.to_string())), rest))
-            },
+            }
             b'*' => {
                 let (data, mut rest) = Self::parse_line(rest)?;
-                let data = std::str::from_utf8(data).map_err(|_| ParseError::InvalidUTF8 )?;
+                let data = std::str::from_utf8(data).map_err(|_| ParseError::InvalidUTF8)?;
                 // The spec uses a 512 MB defauolt max for bulk strings, so usize is enough
-                let len: i64 = data.parse().map_err(|_| ParseError::InvalidInteger )?;
+                let len: i64 = data.parse().map_err(|_| ParseError::InvalidInteger)?;
                 if len == 0 {
-                    return Ok(
-                        (RespFrame::Arrays(vec![]), rest)
-                    );
+                    return Ok((RespFrame::Arrays(vec![]), rest));
                 }
                 let mut items = Vec::with_capacity(len as usize);
                 // TODO what if usize is <0 ?
@@ -87,7 +90,7 @@ impl RespFrame {
                 }
                 Ok((RespFrame::Arrays(items), rest))
             }
-            _ => Err(ParseError::InvalidCommand)
+            _ => Err(ParseError::InvalidCommand),
         }
     }
 
@@ -104,11 +107,9 @@ impl RespFrame {
             RespFrame::SimpleString(s) => format!("+{}\r\n", s).into_bytes(),
             RespFrame::SimpleError(s) => format!("-{}\r\n", s).into_bytes(),
             RespFrame::Integer(i) => format!(":{}\r\n", i).into_bytes(),
-            RespFrame::BulkStrings(s) => {
-                match s {
-                    Some(s) => format!("${}\r\n{}\r\n", s.len(), s).into_bytes(),
-                    None => b"$-1\r\n".to_vec()
-                }
+            RespFrame::BulkStrings(s) => match s {
+                Some(s) => format!("${}\r\n{}\r\n", s.len(), s).into_bytes(),
+                None => b"$-1\r\n".to_vec(),
             },
             RespFrame::Arrays(vec) => {
                 // it should be *{}\r\n and for {} we will iterates
@@ -120,7 +121,6 @@ impl RespFrame {
             }
         }
     }
-
 }
 
 #[cfg(test)]
@@ -221,70 +221,78 @@ mod tests {
     #[test]
     fn parse_array_of_integers() {
         let result = RespFrame::parse("*3\r\n:1\r\n:2\r\n:3\r\n").unwrap();
-        assert_eq!(result, RespFrame::Arrays(vec![
-            RespFrame::Integer(1),
-            RespFrame::Integer(2),
-            RespFrame::Integer(3),
-        ]));
+        assert_eq!(
+            result,
+            RespFrame::Arrays(vec![
+                RespFrame::Integer(1),
+                RespFrame::Integer(2),
+                RespFrame::Integer(3),
+            ])
+        );
     }
 
     #[test]
     fn parse_array_mixed_types() {
         let result = RespFrame::parse("*2\r\n+OK\r\n:42\r\n").unwrap();
-        assert_eq!(result, RespFrame::Arrays(vec![
-            RespFrame::SimpleString("OK".to_string()),
-            RespFrame::Integer(42),
-        ]));
+        assert_eq!(
+            result,
+            RespFrame::Arrays(vec![
+                RespFrame::SimpleString("OK".to_string()),
+                RespFrame::Integer(42),
+            ])
+        );
     }
 
     #[test]
     fn parse_array_of_bulk_strings() {
         let result = RespFrame::parse("*2\r\n$5\r\nhello\r\n$5\r\nworld\r\n").unwrap();
-        assert_eq!(result, RespFrame::Arrays(vec![
-            RespFrame::BulkStrings(Some("hello".to_string())),
-            RespFrame::BulkStrings(Some("world".to_string())),
-        ]));
+        assert_eq!(
+            result,
+            RespFrame::Arrays(vec![
+                RespFrame::BulkStrings(Some("hello".to_string())),
+                RespFrame::BulkStrings(Some("world".to_string())),
+            ])
+        );
     }
 
     #[test]
     fn parse_array_nested() {
         let result = RespFrame::parse("*2\r\n*2\r\n:1\r\n:2\r\n*2\r\n:3\r\n:4\r\n").unwrap();
-        assert_eq!(result, RespFrame::Arrays(vec![
+        assert_eq!(
+            result,
             RespFrame::Arrays(vec![
-                RespFrame::Integer(1),
-                RespFrame::Integer(2),
-            ]),
-            RespFrame::Arrays(vec![
-                RespFrame::Integer(3),
-                RespFrame::Integer(4),
-            ]),
-        ]));
+                RespFrame::Arrays(vec![RespFrame::Integer(1), RespFrame::Integer(2),]),
+                RespFrame::Arrays(vec![RespFrame::Integer(3), RespFrame::Integer(4),]),
+            ])
+        );
     }
 
     #[test]
     fn parse_array_with_null_element() {
         let result = RespFrame::parse("*3\r\n$5\r\nhello\r\n$-1\r\n$5\r\nworld\r\n").unwrap();
-        assert_eq!(result, RespFrame::Arrays(vec![
-            RespFrame::BulkStrings(Some("hello".to_string())),
-            RespFrame::BulkStrings(None),
-            RespFrame::BulkStrings(Some("world".to_string())),
-        ]));
+        assert_eq!(
+            result,
+            RespFrame::Arrays(vec![
+                RespFrame::BulkStrings(Some("hello".to_string())),
+                RespFrame::BulkStrings(None),
+                RespFrame::BulkStrings(Some("world".to_string())),
+            ])
+        );
     }
 
     #[test]
     fn parse_array_with_embedded_crlf_bulk_string() {
         let result = RespFrame::parse("*1\r\n$7\r\nhel\r\nlo\r\n").unwrap();
-        assert_eq!(result, RespFrame::Arrays(vec![
-            RespFrame::BulkStrings(Some("hel\r\nlo".to_string())),
-        ]));
+        assert_eq!(
+            result,
+            RespFrame::Arrays(vec![RespFrame::BulkStrings(Some("hel\r\nlo".to_string())),])
+        );
     }
 
     #[test]
     fn parse_array_single_element() {
         let result = RespFrame::parse("*1\r\n:42\r\n").unwrap();
-        assert_eq!(result, RespFrame::Arrays(vec![
-            RespFrame::Integer(42),
-        ]));
+        assert_eq!(result, RespFrame::Arrays(vec![RespFrame::Integer(42),]));
     }
 
     #[test]
@@ -434,16 +442,13 @@ mod tests {
     #[test]
     fn marshal_array_nested() {
         let frame = RespFrame::Arrays(vec![
-            RespFrame::Arrays(vec![
-                RespFrame::Integer(1),
-                RespFrame::Integer(2),
-            ]),
-            RespFrame::Arrays(vec![
-                RespFrame::Integer(3),
-                RespFrame::Integer(4),
-            ]),
+            RespFrame::Arrays(vec![RespFrame::Integer(1), RespFrame::Integer(2)]),
+            RespFrame::Arrays(vec![RespFrame::Integer(3), RespFrame::Integer(4)]),
         ]);
-        assert_eq!(frame.marshal(), b"*2\r\n*2\r\n:1\r\n:2\r\n*2\r\n:3\r\n:4\r\n");
+        assert_eq!(
+            frame.marshal(),
+            b"*2\r\n*2\r\n:1\r\n:2\r\n*2\r\n:3\r\n:4\r\n"
+        );
     }
 
     #[test]
@@ -453,14 +458,15 @@ mod tests {
             RespFrame::BulkStrings(None),
             RespFrame::BulkStrings(Some("world".to_string())),
         ]);
-        assert_eq!(frame.marshal(), b"*3\r\n$5\r\nhello\r\n$-1\r\n$5\r\nworld\r\n");
+        assert_eq!(
+            frame.marshal(),
+            b"*3\r\n$5\r\nhello\r\n$-1\r\n$5\r\nworld\r\n"
+        );
     }
 
     #[test]
     fn marshal_array_single_element() {
-        let frame = RespFrame::Arrays(vec![
-            RespFrame::Integer(42),
-        ]);
+        let frame = RespFrame::Arrays(vec![RespFrame::Integer(42)]);
         assert_eq!(frame.marshal(), b"*1\r\n:42\r\n");
     }
 
@@ -470,10 +476,7 @@ mod tests {
             RespFrame::SimpleString("OK".to_string()),
             RespFrame::Integer(42),
             RespFrame::BulkStrings(Some("hello".to_string())),
-            RespFrame::Arrays(vec![
-                RespFrame::Integer(1),
-                RespFrame::Integer(2),
-            ]),
+            RespFrame::Arrays(vec![RespFrame::Integer(1), RespFrame::Integer(2)]),
         ]);
         let bytes = frame.marshal();
         let parsed = RespFrame::parse(std::str::from_utf8(&bytes).unwrap()).unwrap();

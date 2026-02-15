@@ -7,10 +7,9 @@ pub struct Store {
 }
 
 impl Store {
-
     pub fn new() -> Self {
         Self {
-            data: HashMap::new()
+            data: HashMap::new(),
         }
     }
 
@@ -22,25 +21,26 @@ impl Store {
             Command::Set(key, value) => {
                 self.set(&key, value);
                 RespFrame::SimpleString("OK".to_string())
-            },
+            }
             Command::Get(key) => {
                 match self.get(&key) {
                     Some(Value::String(s)) => RespFrame::BulkStrings(Some(s.clone())),
-                    Some(_) => RespFrame::SimpleError("WRONGTYPE Operation against a key holding wrong kind of value".to_string()),
+                    Some(_) => RespFrame::SimpleError(
+                        "WRONGTYPE Operation against a key holding wrong kind of value".to_string(),
+                    ),
                     None => RespFrame::BulkStrings(None), // $-1\r\n
                 }
-            },
+            }
             Command::Del(keys) => {
                 let count = keys.into_iter().filter(|key| self.del(key)).count();
                 RespFrame::Integer(count as i64)
-            },
+            }
             Command::Echo(msg) => RespFrame::BulkStrings(Some(msg)),
         }
     }
 
     fn set(&mut self, key: &str, value: Value) -> bool {
-        let was_new = self.data.insert(key.to_string(), value).is_none();
-        was_new
+        self.data.insert(key.to_string(), value).is_none()
     }
 
     fn get(&self, key: &str) -> Option<&Value> {
@@ -89,7 +89,10 @@ mod tests {
     fn del_multiple_some_exist() {
         let mut store = Store::new();
         set(&mut store, "k1", "v");
-        assert_eq!(del(&mut store, vec!["k1", "k2", "k3"]), RespFrame::Integer(1));
+        assert_eq!(
+            del(&mut store, vec!["k1", "k2", "k3"]),
+            RespFrame::Integer(1)
+        );
     }
 
     #[test]

@@ -16,7 +16,8 @@ impl Store {
 
     pub fn execute(&mut self, cmd: Command) -> RespFrame {
         match cmd {
-            Command::Ping => RespFrame::SimpleString("PONG".to_string()),
+            Command::Ping(None) => RespFrame::SimpleString("PONG".to_string()),
+            Command::Ping(Some(msg)) => RespFrame::BulkStrings(Some(msg)),
             Command::Command => RespFrame::SimpleString("OK".to_string()),
             Command::Set(key, value) => {
                 self.set(&key, value);

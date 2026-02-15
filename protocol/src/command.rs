@@ -9,7 +9,7 @@ pub enum Value {
 
 #[derive(Debug, PartialEq)]
 pub enum Command {
-    Ping,
+    Ping(Option<String>),
     Command,
     Set(String, Value),
     Get(String),
@@ -61,7 +61,12 @@ impl Command {
                 if frames.len() > 2 {
                     return Err(CommandError::WrongArity);
                 }
-                Ok(Command::Ping)
+                let msg = if frames.len() == 2 {
+                    Some(expect_bulk_string(&frames[1])?)
+                } else {
+                    None
+                };
+                Ok(Command::Ping(msg))
             }
             "SET" => {
                 if frames.len() != 3 {
@@ -119,7 +124,26 @@ mod tests {
         let frame = RespFrame::Arrays(vec![
             RespFrame::BulkStrings(Some("PING".into())),
         ]);
-        assert_eq!(Command::from_frame(frame), Ok(Command::Ping));
+        assert_eq!(Command::from_frame(frame), Ok(Command::Ping(None)));
+    }
+
+    #[test]
+    fn ping_with_message() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("PING".into())),
+            RespFrame::BulkStrings(Some("hello".into())),
+        ]);
+        assert_eq!(Command::from_frame(frame), Ok(Command::Ping(Some("hello".into()))));
+    }
+
+    #[test]
+    fn ping_too_many_args() {
+        let frame = RespFrame::Arrays(vec![
+            RespFrame::BulkStrings(Some("PING".into())),
+            RespFrame::BulkStrings(Some("a".into())),
+            RespFrame::BulkStrings(Some("b".into())),
+        ]);
+        assert_eq!(Command::from_frame(frame), Err(CommandError::WrongArity));
     }
 
     #[test]
@@ -127,7 +151,7 @@ mod tests {
         let frame = RespFrame::Arrays(vec![
             RespFrame::BulkStrings(Some("ping".into())),
         ]);
-        assert_eq!(Command::from_frame(frame), Ok(Command::Ping));
+        assert_eq!(Command::from_frame(frame), Ok(Command::Ping(None)));
     }
 
     #[test]

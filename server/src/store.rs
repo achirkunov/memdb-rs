@@ -82,6 +82,7 @@ impl Store {
         }
     }
 
+    #[allow(dead_code)] // temporarily unused until async active expiry is wired up
     pub fn evict_expired_sample(&mut self, sample_size: usize) -> usize {
         let now = Instant::now();
         let expired_keys: Vec<String> = self

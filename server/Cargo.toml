@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 memdb-protocol = { path = "../protocol" }
+tokio = { version = "1", features = ["rt", "net", "io-util", "time", "macros"] }

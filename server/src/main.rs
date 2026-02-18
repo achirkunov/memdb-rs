@@ -1,17 +1,15 @@
 mod aof;
 mod store;
 
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, Instant};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 
 use aof::AofWriter;
 use memdb_protocol::{Command, RespFrame};
 use store::Store;
 
-fn handle_client(
+async fn handle_client(
     mut stream: TcpStream,
     store: Arc<Mutex<Store>>,
     aof: Option<Arc<Mutex<AofWriter>>>,
@@ -22,7 +20,7 @@ fn handle_client(
 
     loop {
         // 1. Read chunk from stream
-        let n = match stream.read(&mut buf) {
+        let n = match stream.read(&mut buf).await {
             Ok(0) => return, // client disconnected
             Ok(n) => n,
             Err(e) => {
@@ -55,11 +53,11 @@ fn handle_client(
                         store.execute(cmd)
                     }; // lock released here
                     let bytes = response.marshal();
-                    stream.write_all(&bytes).unwrap();
+                    stream.write_all(&bytes).await.unwrap();
                 }
                 Err(e) => {
                     let bytes = RespFrame::SimpleError(e.to_string()).marshal();
-                    stream.write_all(&bytes).unwrap();
+                    stream.write_all(&bytes).await.unwrap();
                 }
             }
         }
@@ -67,7 +65,10 @@ fn handle_client(
 }
 
 // TODO: Replace with Box<dyn>
-fn main() -> std::io::Result<()> {
+// Single-threaded event loop like Redis: no threads, no locks.
+// All client tasks run cooperatively on one OS thread via spawn_local.
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> std::io::Result<()> {
     let mut port = "6379".to_string();
     let mut bind = "127.0.0.1".to_string();
     let mut appendonly = false;
@@ -116,39 +117,37 @@ fn main() -> std::io::Result<()> {
     let store = Arc::new(Mutex::new(store));
 
     // Active expiration: background thread samples expired keys periodically
-    let expiry_store = Arc::clone(&store);
-    thread::spawn(move || {
-        loop {
-            thread::sleep(Duration::from_millis(100));
-            let start = Instant::now();
-            loop {
-                let expired = expiry_store.lock().unwrap().evict_expired_sample(20);
-                if expired * 4 <= 20 {
-                    break;
-                }
-                if start.elapsed() > Duration::from_millis(25) {
-                    break;
-                }
-            }
-        }
-    });
+    // let expiry_store = Arc::clone(&store);
+    // thread::spawn(move || {
+    //     loop {
+    //         thread::sleep(Duration::from_millis(100));
+    //         let start = Instant::now();
+    //         loop {
+    //             let expired = expiry_store.lock().unwrap().evict_expired_sample(20);
+    //             if expired * 4 <= 20 {
+    //                 break;
+    //             }
+    //             if start.elapsed() > Duration::from_millis(25) {
+    //                 break;
+    //             }
+    //         }
+    //     }
+    // });
 
     let addr = format!("{}:{}", bind, port);
     println!("listening on {}", addr);
-    let listener = TcpListener::bind(&addr)?;
 
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
+    let listener = TcpListener::bind(&addr).await?;
+
+    // TcpListener in tokio has accept() instead of incoming(), plus it is not an iterator
+    loop {
+        match listener.accept().await {
+            Ok((stream, _addr)) => {
                 let store = Arc::clone(&store);
                 let aof = aof.as_ref().map(Arc::clone);
-                thread::spawn(move || {
-                    handle_client(stream, store, aof);
-                });
+                tokio::task::spawn(handle_client(stream, store, aof));
             }
             Err(e) => eprintln!("connection failed: {}", e),
         }
     }
-
-    Ok(())
 }
